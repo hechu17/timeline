@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ageAt, displayDate } from './lib/dates.js'
+import { ageAtStoryDate, compareStoryDates, formatStoryDate, hasStoryDate, isAfterStoryDate } from './lib/dates.js'
 import { isSupabaseConfigured, supabase } from './lib/supabase.js'
 
 const RELATIONSHIP_TYPES = ['亲属', '朋友', '恋人', '师徒', '同事', '盟友', '对手', '其他']
 const CHARACTER_COLORS = ['#b64e32', '#2875a5', '#936000', '#6953a6', '#18775b', '#a94170']
 const DEFAULT_DATE_COLOR = '#92734f'
+const DEFAULT_CUSTOM_ERAS = [{ id: 'default-era', name: '故事纪年', start_year: 1 }]
 
 function App() {
   const previewMode = new URLSearchParams(window.location.search).get('preview') === '1'
@@ -315,6 +316,8 @@ function Workspace({ session }) {
   }, [selectedStoryId, user.id, refreshStories])
 
   const selectedStory = stories.find(story => story.id === selectedStoryId)
+  const calendarMode = selectedStory?.calendar_mode || 'gregorian'
+  const customEras = Array.isArray(selectedStory?.custom_eras) && selectedStory.custom_eras.length ? selectedStory.custom_eras : DEFAULT_CUSTOM_ERAS
   const linksByEvent = useMemo(() => eventCharacterLinks.reduce((map, link) => {
     map[link.timeline_event_id] ||= []
     map[link.timeline_event_id].push(link.character_id)
@@ -323,9 +326,8 @@ function Workspace({ session }) {
   const characterById = useMemo(() => Object.fromEntries(characters.map(character => [character.id, character])), [characters])
   const visibleEvents = useMemo(() => events
     .filter(event => characterFilter === 'all' || (linksByEvent[event.id] || []).includes(characterFilter))
-    .filter(event => !search || `${event.title} ${event.description} ${event.date_label}`.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => a.order_index - b.order_index || (a.event_date || '9999').localeCompare(b.event_date || '9999')),
-  [events, linksByEvent, characterFilter, search])
+    .filter(event => !search || `${event.title} ${event.description} ${event.date_label} ${formatStoryDate(event, 'event', calendarMode, customEras)}`.toLowerCase().includes(search.toLowerCase())),
+  [events, linksByEvent, characterFilter, search, calendarMode, customEras])
 
   function beginCreate(kind, preset = null) {
     setEditor({ kind, record: preset })
@@ -348,7 +350,10 @@ function Workspace({ session }) {
 
   async function saveRecord(kind, values) {
     if (kind === 'story') {
-      const storyRow = { title: values.title.trim(), summary: values.summary.trim(), user_id: user.id }
+      const eras = Array.isArray(values.custom_eras) && values.custom_eras.length
+        ? values.custom_eras.map((era, index) => ({ id: era.id || `era-${index + 1}`, name: era.name.trim(), start_year: Number(era.start_year) || 1 }))
+        : DEFAULT_CUSTOM_ERAS
+      const storyRow = { title: values.title.trim(), summary: values.summary.trim(), calendar_mode: values.calendar_mode || 'gregorian', custom_eras: eras, user_id: user.id }
       let result
       if (values.id) result = await supabase.from('stories').update(storyRow).eq('id', values.id).eq('updated_at', values.updated_at).select().maybeSingle()
       else result = await supabase.from('stories').insert(storyRow).select().single()
@@ -486,8 +491,8 @@ function Workspace({ session }) {
             {notice && <div className={`notice ${notice.type}`} role="status"><span>{notice.type === 'error' ? '!' : '✓'}</span>{notice.text}<button aria-label="关闭提示" onClick={() => setNotice(null)}>×</button></div>}
             {dataLoading || storyLoading ? <div className="loading-line"><span className="spinner" />正在整理故事资料…</div> : (
               <>
-                {tab === 'timeline' && <TimelineView events={visibleEvents} allEvents={events} characters={characters} characterById={characterById} linksByEvent={linksByEvent} search={search} setSearch={setSearch} characterFilter={characterFilter} setCharacterFilter={setCharacterFilter} onEdit={record => beginEdit('event', record)} onDelete={record => deleteRecord('event', record)} onAdd={addEventAtEnd} onInsert={preset => beginCreate('event', preset)} />}
-                {tab === 'characters' && <CharactersView characters={characters} events={events} linksByEvent={linksByEvent} onEdit={record => beginEdit('character', record)} onDelete={record => deleteRecord('character', record)} onAdd={() => beginCreate('character')} />}
+                {tab === 'timeline' && <TimelineView events={visibleEvents} allEvents={events} characters={characters} characterById={characterById} linksByEvent={linksByEvent} search={search} setSearch={setSearch} characterFilter={characterFilter} setCharacterFilter={setCharacterFilter} calendarMode={calendarMode} eras={customEras} onEdit={record => beginEdit('event', record)} onDelete={record => deleteRecord('event', record)} onAdd={addEventAtEnd} onInsert={preset => beginCreate('event', preset)} />}
+                {tab === 'characters' && <CharactersView characters={characters} events={events} linksByEvent={linksByEvent} calendarMode={calendarMode} eras={customEras} onEdit={record => beginEdit('character', record)} onDelete={record => deleteRecord('character', record)} onAdd={() => beginCreate('character')} />}
                 {tab === 'relationships' && <RelationshipsView relationships={relationships} characterById={characterById} characters={characters} onEdit={record => beginEdit('relationship', record)} onDelete={record => deleteRecord('relationship', record)} onAdd={() => beginCreate('relationship')} onAddCharacter={() => beginCreate('character')} />}
               </>
             )}
@@ -496,17 +501,21 @@ function Workspace({ session }) {
         )}
       </main>
 
-      {editor && <EditorDialog key={`${editor.kind}-${editor.record?.id || 'new'}`} kind={editor.kind} record={editor.record} characters={characters} events={events} onClose={() => setEditor(null)} onSave={async values => { await saveRecord(editor.kind, values); setEditor(null) }} />}
+      {editor && <EditorDialog key={`${editor.kind}-${editor.record?.id || 'new'}`} kind={editor.kind} record={editor.record} characters={characters} events={events} calendarMode={calendarMode} eras={customEras} onClose={() => setEditor(null)} onSave={async values => { await saveRecord(editor.kind, values); setEditor(null) }} />}
       {!notice && <div className="sr-only" aria-live="polite">{dataLoading ? '正在同步' : '已同步'}</div>}
     </div>
   )
 }
 
-function TimelineView({ events, allEvents, characters, characterById, linksByEvent, search, setSearch, characterFilter, setCharacterFilter, onEdit, onDelete, onAdd, onInsert }) {
+function TimelineView({ events, allEvents, characters, characterById, linksByEvent, search, setSearch, characterFilter, setCharacterFilter, calendarMode = 'gregorian', eras = [], onEdit, onDelete, onAdd, onInsert }) {
   const [sortDirection, setSortDirection] = useState('asc')
   const displayedEvents = [...events].sort((a, b) => {
-    const order = (Number(a.order_index) || 0) - (Number(b.order_index) || 0)
-      || (a.event_date || '9999').localeCompare(b.event_date || '9999')
+    const aHasDate = hasStoryDate(a, 'event', calendarMode, eras)
+    const bHasDate = hasStoryDate(b, 'event', calendarMode, eras)
+    if (aHasDate !== bHasDate) return aHasDate ? -1 : 1
+    const dateOrder = compareStoryDates(a, 'event', b, 'event', calendarMode, eras) || 0
+    const order = dateOrder || (Number(a.order_index) || 0) - (Number(b.order_index) || 0)
+      || (a.created_at || '').localeCompare(b.created_at || '')
     return sortDirection === 'asc' ? order : -order
   })
   const focusedCharacter = characterById[characterFilter]
@@ -527,7 +536,7 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
   return (
     <section className="timeline-section">
       <div className="list-toolbar">
-        <div className="timeline-intro"><span className="timeline-intro-mark">01</span><span><strong>事件编年</strong><small>按故事顺序排列 · 支持人物专属视角</small></span></div>
+        <div className="timeline-intro"><span className="timeline-intro-mark">01</span><span><strong>事件编年</strong><small>按日期自动排列 · 支持人物专属视角</small></span></div>
         <div className="toolbar-filters"><button className="sort-toggle" aria-pressed={sortDirection === 'asc'} onClick={() => setSortDirection(direction => direction === 'asc' ? 'desc' : 'asc')}>{sortDirection === 'asc' ? '↑ 正序' : '↓ 倒序'}</button><label className="search-field"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索事件" /></label></div>
       </div>
       <div className="perspective-bar">
@@ -550,13 +559,19 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
             const firstParticipant = characterById[participantIds[0]]
             const accentCharacter = focusedCharacter || firstParticipant
             const accent = accentCharacter?.color || CHARACTER_COLORS[Math.max(0, characters.indexOf(accentCharacter)) % CHARACTER_COLORS.length]
-            const eventAge = focusedCharacter ? ageAt(focusedCharacter.birth_date, event.event_date) : null
-            const afterDeath = focusedCharacter?.death_date && event.event_date && event.event_date > focusedCharacter.death_date
-            const ageLabel = !focusedCharacter?.birth_date ? '生日待填' : !event.event_date ? '日期待定' : afterDeath ? '逝世后' : eventAge || '年龄待定'
+            const eventDate = formatStoryDate(event, 'event', calendarMode, eras)
+            const displayEventDate = calendarMode === 'custom' ? eventDate || event.date_label : event.date_label || eventDate
+            const secondaryEventDate = calendarMode === 'custom' ? (eventDate && event.date_label ? event.date_label : '') : (event.event_date && event.date_label ? eventDate : '')
+            const eventAge = focusedCharacter ? ageAtStoryDate(focusedCharacter, event, calendarMode, eras) : null
+            const afterDeath = focusedCharacter && hasStoryDate(focusedCharacter, 'death', calendarMode, eras)
+              && isAfterStoryDate(event, 'event', focusedCharacter, 'death', calendarMode, eras)
+            const hasEventDate = hasStoryDate(event, 'event', calendarMode, eras)
+            const hasBirthDate = focusedCharacter && hasStoryDate(focusedCharacter, 'birth', calendarMode, eras)
+            const ageLabel = !hasBirthDate ? '生日待填' : !hasEventDate ? '日期待定' : afterDeath ? '逝世后' : eventAge || '年龄待定'
             return (
               <article className={`timeline-row ${focusedCharacter ? 'with-age-axis' : ''}`} key={event.id} style={{ '--event-accent': accent, '--date-color': event.date_color || DEFAULT_DATE_COLOR, '--person-color': focusedCharacter?.color || accent }}>
                 <div className="timeline-marker-column"><span className="timeline-node">{String(index + 1).padStart(2, '0')}</span><span className="timeline-stem" /></div>
-                <div className="timeline-date-column"><span className="date-chip">{event.date_label || displayDate(event.event_date) || '时间待定'}</span>{event.event_date && event.date_label && <small>{displayDate(event.event_date)}</small>}</div>
+                <div className="timeline-date-column"><span className="date-chip">{displayEventDate || '时间待定'}</span>{secondaryEventDate && <small>{secondaryEventDate}</small>}</div>
                 <div className="event-card">
                   <div className="event-card-top"><span className="event-kicker">STORY BEAT　/　{String(index + 1).padStart(2, '0')}</span><div className="record-actions"><button onClick={() => onEdit(event)}>编辑</button><button className="danger-text" onClick={() => onDelete(event)}>删除</button></div></div>
                   <h2>{event.title}</h2>
@@ -567,12 +582,13 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
                         const character = characterById[id]
                         if (!character) return null
                         const color = character.color || CHARACTER_COLORS[Math.max(0, characters.indexOf(character)) % CHARACTER_COLORS.length]
-                        const age = ageAt(character.birth_date, event.event_date)
-                        const afterDeath = character.death_date && event.event_date && event.event_date > character.death_date
+                        const age = ageAtStoryDate(character, event, calendarMode, eras)
+                        const afterDeath = hasStoryDate(character, 'death', calendarMode, eras)
+                          && isAfterStoryDate(event, 'event', character, 'death', calendarMode, eras)
                         return <span className={`person-tag ${afterDeath || age === '出生前' ? 'muted' : ''}`} key={id} style={{ '--person-color': color }}><i>{character.name.slice(0, 1)}</i>{character.name}{age && <small>{age}</small>}{afterDeath && <small>逝世后</small>}</span>
                       }) : <span className="no-participants">尚未关联人物</span>}
                     </div>
-                  {participantIds.some(id => characterById[id]?.birth_date && !event.event_date) && <span className="age-hint">补充事件日期后可核对年龄</span>}
+                  {participantIds.some(id => hasStoryDate(characterById[id], 'birth', calendarMode, eras) && !hasEventDate) && <span className="age-hint">补充事件日期后可核对年龄</span>}
                   </div>
                   {nextEvent && <button className="insert-between-event" title={`在「${event.title}」和「${nextEvent.title}」之间插入事件`} aria-label={`在「${event.title}」和「${nextEvent.title}」之间插入事件`} onClick={() => onInsert({ order_index: orderIndexBetween(event, nextEvent) })}>＋ 在两件事之间插入事件</button>}
                 </div>
@@ -587,7 +603,7 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
   )
 }
 
-function CharactersView({ characters, events, linksByEvent, onEdit, onDelete, onAdd }) {
+function CharactersView({ characters, events, linksByEvent, calendarMode = 'gregorian', eras = [], onEdit, onDelete, onAdd }) {
   if (!characters.length) return <EmptyState title="还没有人物档案" copy="先添加主角，再慢慢补上生日、经历和故事中的位置。" action="添加第一个人物" onAction={onAdd} />
   return (
     <section className="character-grid">
@@ -601,7 +617,7 @@ function CharactersView({ characters, events, linksByEvent, onEdit, onDelete, on
             <h2>{character.name}</h2>
             <p className="character-description">{character.description || '还没有人物简介。为 TA 记下性格、目标或背景。'}</p>
             <div className="character-facts">
-              <span><small>出生</small>{character.birth_date ? displayDate(character.birth_date) : '未填写'}</span>
+               <span><small>出生</small>{formatStoryDate(character, 'birth', calendarMode, eras) || '未填写'}</span>
               <span><small>登场事件</small>{appearances} 个</span>
             </div>
           </article>
@@ -690,12 +706,12 @@ function EmptyState({ title, copy, action, onAction }) {
   return <div className="empty-state"><span className="empty-state-orbit">✳</span><p className="eyebrow">留白也是开始</p><h2>{title}</h2><p>{copy}</p><button className="button button-secondary" onClick={onAction}>＋　{action}</button></div>
 }
 
-function EditorDialog({ kind, record, characters, events, onClose, onSave }) {
+function EditorDialog({ kind, record, characters, events, calendarMode = 'gregorian', eras = DEFAULT_CUSTOM_ERAS, onClose, onSave }) {
   const isEditing = Boolean(record?.id)
   const defaults = {
-    story: { title: '', summary: '' },
-    character: { name: '', role: '', birth_date: '', death_date: '', color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length], description: '' },
-    event: { title: '', event_date: '', date_label: '', date_color: DEFAULT_DATE_COLOR, order_index: String(Math.max(0, ...events.map(event => Number(event.order_index) || 0)) + 10), description: '', characterIds: [] },
+    story: { title: '', summary: '', calendar_mode: 'gregorian', custom_eras: DEFAULT_CUSTOM_ERAS },
+    character: { name: '', role: '', birth_date: '', death_date: '', birth_era_id: '', birth_year: '', birth_month: '', birth_day: '', death_era_id: '', death_year: '', death_month: '', death_day: '', color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length], description: '' },
+    event: { title: '', event_date: '', event_era_id: '', event_year: '', event_month: '', event_day: '', date_label: '', date_color: DEFAULT_DATE_COLOR, order_index: String(Math.max(0, ...events.map(event => Number(event.order_index) || 0)) + 10), description: '', characterIds: [] },
     relationship: { source_character_id: characters[0]?.id || '', target_character_id: characters[1]?.id || '', relationship_type: '朋友', start_label: '', end_label: '', notes: '' },
   }
   const [form, setForm] = useState({ ...defaults[kind], ...(record || {}) })
@@ -717,16 +733,57 @@ function EditorDialog({ kind, record, characters, events, onClose, onSave }) {
     update('characterIds', current.includes(characterId) ? current.filter(id => id !== characterId) : [...current, characterId])
   }
 
+  function updateEra(index, changes) {
+    const current = Array.isArray(form.custom_eras) && form.custom_eras.length ? form.custom_eras : DEFAULT_CUSTOM_ERAS
+    update('custom_eras', current.map((era, eraIndex) => eraIndex === index ? { ...era, ...changes } : era))
+  }
+
+  function addEra() {
+    const current = Array.isArray(form.custom_eras) && form.custom_eras.length ? form.custom_eras : DEFAULT_CUSTOM_ERAS
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `era-${Date.now()}`
+    update('custom_eras', [...current, { id, name: '新纪元', start_year: 1 }])
+  }
+
+  function removeEra(id) {
+    const current = Array.isArray(form.custom_eras) ? form.custom_eras : DEFAULT_CUSTOM_ERAS
+    update('custom_eras', current.filter(era => era.id !== id))
+  }
+
   async function submit(event) {
     event.preventDefault()
     setBusy(true)
     setError('')
     try {
       const values = { ...form }
+      if (kind === 'story') {
+        const eraList = (Array.isArray(values.custom_eras) && values.custom_eras.length ? values.custom_eras : DEFAULT_CUSTOM_ERAS)
+          .map((era, index) => ({ id: era.id || `era-${index + 1}`, name: String(era.name || '').trim(), start_year: Number(era.start_year) }))
+        if (values.calendar_mode === 'custom' && !eraList.length) throw new Error('自定义纪年至少需要一个时代。')
+        if (eraList.some(era => !era.name || !Number.isInteger(era.start_year) || era.start_year < 1)) throw new Error('请填写每个时代的名称和有效的元年起始年份。')
+        if (new Set(eraList.map(era => era.name.toLocaleLowerCase())).size !== eraList.length) throw new Error('时代名称不能重复。')
+        values.custom_eras = eraList
+      }
       if (kind === 'event') values.order_index = Number(values.order_index) || 0
       if (kind === 'character') {
         values.birth_date ||= null
         values.death_date ||= null
+      }
+      if (kind === 'event' || kind === 'character') {
+        const prefixes = kind === 'event' ? ['event'] : ['birth', 'death']
+        for (const prefix of prefixes) {
+          const eraId = values[`${prefix}_era_id`]
+          const year = values[`${prefix}_year`]
+          const month = values[`${prefix}_month`]
+          const day = values[`${prefix}_day`]
+          const hasParts = Boolean(eraId || year || month || day)
+          if (hasParts && (!eraId || !year || !Number.isInteger(Number(year)) || Number(year) < 1)) throw new Error('自定义日期需要选择时代并填写有效年份。')
+          if (month && (!Number.isInteger(Number(month)) || Number(month) < 1 || Number(month) > 12)) throw new Error('月份范围是 1 到 12 的整数。')
+          if (day && (!Number.isInteger(Number(day)) || Number(day) < 1 || Number(day) > 31)) throw new Error('日期范围是 1 到 31 的整数。')
+          values[`${prefix}_year`] = year ? Number(year) : null
+          values[`${prefix}_month`] = month ? Number(month) : null
+          values[`${prefix}_day`] = day ? Number(day) : null
+          values[`${prefix}_era_id`] = eraId || null
+        }
       }
       await onSave(values)
     } catch (saveError) {
@@ -744,18 +801,31 @@ function EditorDialog({ kind, record, characters, events, onClose, onSave }) {
           {kind === 'story' && <>
             <Field label="故事名称"><input autoFocus maxLength={120} value={form.title} onChange={event => update('title', event.target.value)} placeholder="例如：雾港来信" required /></Field>
             <Field label="一句话简介" hint="可以之后再补充"><textarea rows="3" maxLength={500} value={form.summary} onChange={event => update('summary', event.target.value)} placeholder="这个故事正在讲述什么？" /></Field>
+            <Field label="时间方式" hint="为整个故事选择一种纪年"><select value={form.calendar_mode || 'gregorian'} onChange={event => update('calendar_mode', event.target.value)}><option value="gregorian">现实公历</option><option value="custom">自定义时代与年月日</option></select></Field>
+            {form.calendar_mode === 'custom' && <section className="era-settings"><div className="era-settings-heading"><strong>故事时代</strong><button type="button" className="text-button" onClick={addEra}>＋ 添加时代</button></div>
+              {(Array.isArray(form.custom_eras) && form.custom_eras.length ? form.custom_eras : DEFAULT_CUSTOM_ERAS).map((era, index) => {
+                const uses = events.filter(event => event.event_era_id === era.id).length
+                  + characters.filter(character => [character.birth_era_id, character.death_era_id].includes(era.id)).length
+                return <div className="era-editor-row" key={era.id}>
+                  <Field label={`时代 ${index + 1}`}><input maxLength={60} value={era.name || ''} onChange={event => updateEra(index, { name: event.target.value })} placeholder="例如：星历时代" /></Field>
+                  <Field label="元年对应的故事年份" hint="跨时代计算年龄时使用"><input type="number" min="1" step="1" value={era.start_year || ''} onChange={event => updateEra(index, { start_year: event.target.value })} /></Field>
+                  <button type="button" className="remove-era-button" disabled={uses > 0 || (form.custom_eras || []).length <= 1} title={uses ? `有 ${uses} 个日期正在使用此时代` : '删除时代'} onClick={() => removeEra(era.id)}>移除</button>
+                </div>
+              })}
+              <p className="field-hint">时代元年可对应故事中的连续年份。例如，新纪元元年若相当于故事第 101 年，就填 101；事件仍只需填写这个时代内的年、月、日。</p>
+              <p className="field-hint">原有公历日期会保留；尚未补录自定义日期的资料会标注“公历”，暂不参与自定义年龄计算。</p>
+            </section>}
           </>}
           {kind === 'character' && <>
             <div className="form-grid"><Field label="人物姓名"><input autoFocus maxLength={100} value={form.name} onChange={event => update('name', event.target.value)} placeholder="输入姓名" required /></Field><Field label="身份 / 角色"><input maxLength={100} value={form.role} onChange={event => update('role', event.target.value)} placeholder="主角、导师、叙述者…" /></Field></div>
             <Field label="人物专属颜色" hint="用于人物标签和专属时间线"><div className="color-field"><input type="color" value={form.color || CHARACTER_COLORS[0]} onChange={event => update('color', event.target.value)} /><code>{form.color || CHARACTER_COLORS[0]}</code><span>在时间线中快速识别 TA</span></div></Field>
-            <div className="form-grid"><Field label="出生日期" hint="用于计算事件发生时的年龄"><input type="date" value={form.birth_date || ''} onChange={event => update('birth_date', event.target.value)} /></Field><Field label="去世日期"><input type="date" value={form.death_date || ''} onChange={event => update('death_date', event.target.value)} /></Field></div>
+            {calendarMode === 'custom' ? <><CustomDateFields record={form} prefix="birth" label="出生时间" eras={eras} update={update} /><CustomDateFields record={form} prefix="death" label="去世时间" eras={eras} update={update} /></> : <div className="form-grid"><Field label="出生日期" hint="用于计算事件发生时的年龄"><input type="date" value={form.birth_date || ''} onChange={event => update('birth_date', event.target.value)} /></Field><Field label="去世日期"><input type="date" value={form.death_date || ''} onChange={event => update('death_date', event.target.value)} /></Field></div>}
             <Field label="人物档案" hint="性格、目标、背景或其他创作备注"><textarea rows="4" maxLength={3000} value={form.description} onChange={event => update('description', event.target.value)} placeholder="写下你希望在创作中记住的事…" /></Field>
           </>}
           {kind === 'event' && <>
             <Field label="事件名称"><input autoFocus maxLength={160} value={form.title} onChange={event => update('title', event.target.value)} placeholder="例如：两人在旧车站重逢" required /></Field>
-            <div className="form-grid"><Field label="精确日期" hint="已知具体日期时填写，可计算人物年龄"><input type="date" value={form.event_date || ''} onChange={event => update('event_date', event.target.value)} /></Field><Field label="故事内日期" hint="可填写纪年、季节或模糊时间"><input maxLength={100} value={form.date_label || ''} onChange={event => update('date_label', event.target.value)} placeholder="例如：王历十二年·初秋" /></Field></div>
+            {calendarMode === 'custom' ? <><CustomDateFields record={form} prefix="event" label="事件时间" eras={eras} update={update} /><Field label="补充时间" hint="可写季节、节气或模糊时间"><input maxLength={100} value={form.date_label || ''} onChange={event => update('date_label', event.target.value)} placeholder="例如：初秋、庆典后数日" /></Field></> : <div className="form-grid"><Field label="精确日期" hint="已知具体日期时填写，可计算人物年龄"><input type="date" value={form.event_date || ''} onChange={event => update('event_date', event.target.value)} /></Field><Field label="故事内日期" hint="可填写纪年、季节或模糊时间"><input maxLength={100} value={form.date_label || ''} onChange={event => update('date_label', event.target.value)} placeholder="例如：王历十二年·初秋" /></Field></div>}
             <Field label="时间文字颜色" hint="只改变这条事件的日期标签颜色"><div className="color-field"><input type="color" value={form.date_color || DEFAULT_DATE_COLOR} onChange={event => update('date_color', event.target.value)} /><code>{form.date_color || DEFAULT_DATE_COLOR}</code><span>用于时间线左侧的日期</span></div></Field>
-            <Field label="顺序编号" hint="数字越小，越早发生；支持小数，便于在两个事件之间插入"><input type="number" step="any" value={form.order_index} onChange={event => update('order_index', event.target.value)} /></Field>
             <Field label="事件内容"><textarea rows="3" maxLength={3000} value={form.description || ''} onChange={event => update('description', event.target.value)} placeholder="补充事件经过、转折或前因后果…" /></Field>
             <fieldset className="people-picker"><legend>关联人物 <small>可多选</small></legend>{characters.length ? <div className="people-options">{characters.map(character => <label key={character.id} className={(form.characterIds || []).includes(character.id) ? 'selected' : ''}><input type="checkbox" checked={(form.characterIds || []).includes(character.id)} onChange={() => toggleCharacter(character.id)} /><span className="checkbox-mark">✓</span>{character.name}</label>)}</div> : <p className="field-hint">还没有人物档案，可以先保存事件再添加人物。</p>}</fieldset>
           </>}
@@ -771,6 +841,18 @@ function EditorDialog({ kind, record, characters, events, onClose, onSave }) {
       </section>
     </div>
   )
+}
+
+function CustomDateFields({ record, prefix, label, eras, update }) {
+  return <div className="custom-date-group">
+    <strong className="custom-date-group-label">{label}</strong>
+    <div className="form-grid custom-date-fields">
+      <Field label="时代"><select value={record[`${prefix}_era_id`] || ''} onChange={event => update(`${prefix}_era_id`, event.target.value)}><option value="">未填写</option>{eras.map(era => <option key={era.id} value={era.id}>{era.name}</option>)}</select></Field>
+      <Field label="年"><input type="number" min="1" step="1" value={record[`${prefix}_year`] ?? ''} onChange={event => update(`${prefix}_year`, event.target.value)} placeholder="例如：12" /></Field>
+      <Field label="月" hint="可留空"><input type="number" min="1" max="12" step="1" value={record[`${prefix}_month`] ?? ''} onChange={event => update(`${prefix}_month`, event.target.value)} placeholder="1–12" /></Field>
+      <Field label="日" hint="可留空"><input type="number" min="1" max="31" step="1" value={record[`${prefix}_day`] ?? ''} onChange={event => update(`${prefix}_day`, event.target.value)} placeholder="1–31" /></Field>
+    </div>
+  </div>
 }
 
 function Field({ label, hint, children }) {

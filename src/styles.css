@@ -304,6 +304,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dialog-close { width: 28px; height: 28px; border: 1px solid #e7e5dd; background: #f7f6f0; font-size: 19px; }
 .editor-dialog form { display: grid; gap: 14px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.custom-date-group { display: grid; gap: 8px; }
+.custom-date-group-label { color: #465c52; font-size: 10px; font-weight: 600; }
+.era-settings { display: grid; gap: 11px; padding: 12px; border: 1px solid #e4e5dc; border-radius: 7px; background: #f8f8f1; }
+.era-settings-heading { display: flex; align-items: center; justify-content: space-between; color: #465c52; font-size: 11px; }
+.text-button { padding: 4px 0; border: 0; background: transparent; color: #3d7865; cursor: pointer; font-size: 10px; }
+.text-button:hover { color: #245543; }
+.era-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 9px; }
+.remove-era-button { padding: 8px 4px; border: 0; background: transparent; color: #a36b61; cursor: pointer; font-size: 9px; }
+.remove-era-button:disabled { color: #b6bbb5; cursor: not-allowed; }
+.era-settings > .field-hint { line-height: 1.6; }
+@media (max-width: 560px) { .era-editor-row { grid-template-columns: 1fr; gap: 6px; } .remove-era-button { justify-self: start; } }
 .form-field { gap: 6px; color: #56645f; font-size: 10px; }
 .form-field > span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .form-field > span small { color: #a2aaa3; font-size: 8px; font-weight: 400; text-align: right; }
