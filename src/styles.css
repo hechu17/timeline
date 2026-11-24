@@ -311,6 +311,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .text-button { padding: 4px 0; border: 0; background: transparent; color: #3d7865; cursor: pointer; font-size: 10px; }
 .text-button:hover { color: #245543; }
 .era-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 9px; }
+.era-order-buttons { display: flex; align-items: center; gap: 3px; }
+.era-order-buttons > button:not(.remove-era-button) { width: 22px; height: 27px; border: 1px solid #e0e3d9; border-radius: 4px; background: #fffefa; color: #60766a; cursor: pointer; font-size: 11px; }
+.era-order-buttons > button:disabled { color: #b7beb7; cursor: not-allowed; }
 .remove-era-button { padding: 8px 4px; border: 0; background: transparent; color: #a36b61; cursor: pointer; font-size: 9px; }
 .remove-era-button:disabled { color: #b6bbb5; cursor: not-allowed; }
 .era-settings > .field-hint { line-height: 1.6; }

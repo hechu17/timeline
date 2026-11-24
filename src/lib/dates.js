@@ -16,14 +16,17 @@ function dateFor(record, prefix, calendarMode = 'gregorian', eras = []) {
   if (!record) return null
   if (calendarMode === 'custom') {
     const eraId = record[`${prefix}_era_id`]
-    const localYear = Number(record[`${prefix}_year`])
+    const rawYear = record[`${prefix}_year`]
+    const hasYear = rawYear !== null && rawYear !== undefined && rawYear !== ''
+    const localYear = hasYear ? Number(rawYear) : 0
     const eraIndex = eras.findIndex(era => era.id === eraId)
     const era = eraIndex >= 0 ? eras[eraIndex] : null
-    if (!era || !Number.isInteger(localYear) || localYear < 1) return null
+    if (!era || (hasYear && (!Number.isInteger(localYear) || localYear < 1))) return null
     const startYear = Number(era.start_year) || 1
     return {
-      year: startYear + localYear - 1,
+      year: hasYear ? startYear + localYear - 1 : startYear - 1,
       localYear,
+      hasYear,
       month: Number(record[`${prefix}_month`]) || 0,
       day: Number(record[`${prefix}_day`]) || 0,
       eraName: era.name,
@@ -46,7 +49,10 @@ export function compareStoryDates(first, firstPrefix, second, secondPrefix, cale
   const a = dateFor(first, firstPrefix, calendarMode, eras)
   const b = dateFor(second, secondPrefix, calendarMode, eras)
   if (!a || !b) return null
-  for (const key of ['year', 'month', 'day', 'eraIndex']) {
+  const keys = calendarMode === 'custom'
+    ? ['eraIndex', 'localYear', 'month', 'day']
+    : ['year', 'month', 'day']
+  for (const key of keys) {
     if (a[key] !== b[key]) return a[key] < b[key] ? -1 : 1
   }
   return 0
@@ -56,6 +62,7 @@ export function ageAtStoryDate(character, event, calendarMode = 'gregorian', era
   const birth = dateFor(character, 'birth', calendarMode, eras)
   const moment = dateFor(event, 'event', calendarMode, eras)
   if (!birth || !moment) return null
+  if (calendarMode === 'custom' && (!birth.hasYear || !moment.hasYear)) return null
   if (moment.year < birth.year || (moment.year === birth.year && birth.month > 0 && moment.month > 0
     && (moment.month < birth.month || (moment.month === birth.month && birth.day > 0 && moment.day > 0 && moment.day < birth.day)))) return '出生前'
 
@@ -81,7 +88,8 @@ export function formatStoryDate(record, prefix, calendarMode = 'gregorian', eras
   if (calendarMode !== 'custom') return displayDate(record[`${prefix}_date`])
   const month = date.month ? `${date.month}月` : ''
   const day = date.day ? `${date.day}日` : ''
-  return `${date.eraName}第${date.localYear}年${month}${day}`
+  const year = date.hasYear ? `第${date.localYear}年` : ''
+  return `${date.eraName}${year}${month}${day}`
 }
 
 export function displayDate(value) {

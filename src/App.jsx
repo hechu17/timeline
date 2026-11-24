@@ -7,6 +7,20 @@ const CHARACTER_COLORS = ['#b64e32', '#2875a5', '#936000', '#6953a6', '#18775b',
 const DEFAULT_DATE_COLOR = '#92734f'
 const DEFAULT_CUSTOM_ERAS = [{ id: 'default-era', name: '故事纪年', start_year: 1 }]
 
+function suggestEraStartYear(eras, events, characters) {
+  const eventYears = events.map(event => {
+    const era = eras.find(item => item.id === event.event_era_id)
+    const year = Number(event.event_year)
+    return era && year > 0 ? (Number(era.start_year) || 1) + year - 1 : 0
+  })
+  const characterYears = characters.flatMap(character => ['birth', 'death'].map(prefix => {
+    const era = eras.find(item => item.id === character[`${prefix}_era_id`])
+    const year = Number(character[`${prefix}_year`])
+    return era && year > 0 ? (Number(era.start_year) || 1) + year - 1 : 0
+  }))
+  return Math.max(1, ...eras.map(era => Number(era.start_year) || 1), ...eventYears, ...characterYears) + 1
+}
+
 function App() {
   const previewMode = new URLSearchParams(window.location.search).get('preview') === '1'
   const [session, setSession] = useState(null)
@@ -365,6 +379,41 @@ function Workspace({ session }) {
       return
     }
     if (!selectedStoryId) throw new Error('请先选择一个故事项目。')
+
+    if (calendarMode === 'custom' && (kind === 'event' || kind === 'character')) {
+      const prefixes = kind === 'event' ? ['event'] : ['birth', 'death']
+      const updatedEras = [...customEras]
+      let erasChanged = false
+      for (const prefix of prefixes) {
+        const eraName = String(values[`${prefix}_era_name`] || '').trim()
+        const hasParts = Boolean(values[`${prefix}_year`] || values[`${prefix}_month`] || values[`${prefix}_day`])
+        if (!eraName && !hasParts) {
+          values[`${prefix}_era_id`] = null
+          delete values[`${prefix}_era_name`]
+          continue
+        }
+        const requestedName = eraName || updatedEras[0]?.name || '故事纪年'
+        let era = updatedEras.find(item => item.name.trim().toLocaleLowerCase() === requestedName.toLocaleLowerCase())
+        if (!era) {
+          era = {
+            id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `era-${Date.now()}-${prefix}`,
+            name: requestedName,
+            start_year: suggestEraStartYear(updatedEras, events, characters),
+          }
+          updatedEras.push(era)
+          erasChanged = true
+        }
+        values[`${prefix}_era_id`] = era.id
+        delete values[`${prefix}_era_name`]
+      }
+      if (erasChanged) {
+        const { data, error } = await supabase.from('stories').update({ custom_eras: updatedEras })
+          .eq('id', selectedStoryId).eq('updated_at', selectedStory.updated_at).select().maybeSingle()
+        if (error) throw error
+        if (!data) throw new Error('故事时代列表已在另一台设备上更新，请重新打开后再保存。')
+        setStories(current => current.map(story => story.id === data.id ? data : story))
+      }
+    }
 
     const table = kind === 'character' ? 'characters' : kind === 'event' ? 'timeline_events' : 'relationships'
     const { id, characterIds, updated_at: version, ...fields } = values
@@ -741,7 +790,28 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
   function addEra() {
     const current = Array.isArray(form.custom_eras) && form.custom_eras.length ? form.custom_eras : DEFAULT_CUSTOM_ERAS
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `era-${Date.now()}`
-    update('custom_eras', [...current, { id, name: '新纪元', start_year: 1 }])
+    const dateYears = [
+      ...events.map(event => {
+        const era = current.find(item => item.id === event.event_era_id)
+        return era && Number(event.event_year) > 0 ? (Number(era.start_year) || 1) + Number(event.event_year) - 1 : 0
+      }),
+      ...characters.flatMap(character => ['birth', 'death'].map(prefix => {
+        const era = current.find(item => item.id === character[`${prefix}_era_id`])
+        const year = Number(character[`${prefix}_year`])
+        return era && year > 0 ? (Number(era.start_year) || 1) + year - 1 : 0
+      })),
+    ]
+    const nextStartYear = Math.max(1, ...current.map(era => Number(era.start_year) || 1), ...dateYears) + 1
+    update('custom_eras', [...current, { id, name: '新纪元', start_year: nextStartYear }])
+  }
+
+  function moveEra(index, direction) {
+    const current = Array.isArray(form.custom_eras) && form.custom_eras.length ? form.custom_eras : DEFAULT_CUSTOM_ERAS
+    const target = index + direction
+    if (target < 0 || target >= current.length) return
+    const reordered = [...current]
+    ;[reordered[index], reordered[target]] = [reordered[target], reordered[index]]
+    update('custom_eras', reordered)
   }
 
   function removeEra(id) {
@@ -772,16 +842,18 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
         const prefixes = kind === 'event' ? ['event'] : ['birth', 'death']
         for (const prefix of prefixes) {
           const eraId = values[`${prefix}_era_id`]
+          const eraName = String(values[`${prefix}_era_name`] || eras.find(era => era.id === eraId)?.name || '').trim()
           const year = values[`${prefix}_year`]
           const month = values[`${prefix}_month`]
           const day = values[`${prefix}_day`]
-          const hasParts = Boolean(eraId || year || month || day)
-          if (hasParts && (!eraId || !year || !Number.isInteger(Number(year)) || Number(year) < 1)) throw new Error('自定义日期需要选择时代并填写有效年份。')
+          if ((month || day) && !year) throw new Error('填写月份或日期时，请同时填写年份。')
+          if (year && (!Number.isInteger(Number(year)) || Number(year) < 1)) throw new Error('年份必须是大于或等于 1 的整数。')
           if (month && (!Number.isInteger(Number(month)) || Number(month) < 1 || Number(month) > 12)) throw new Error('月份范围是 1 到 12 的整数。')
           if (day && (!Number.isInteger(Number(day)) || Number(day) < 1 || Number(day) > 31)) throw new Error('日期范围是 1 到 31 的整数。')
           values[`${prefix}_year`] = year ? Number(year) : null
           values[`${prefix}_month`] = month ? Number(month) : null
           values[`${prefix}_day`] = day ? Number(day) : null
+          values[`${prefix}_era_name`] = eraName
           values[`${prefix}_era_id`] = eraId || null
         }
       }
@@ -809,10 +881,10 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
                 return <div className="era-editor-row" key={era.id}>
                   <Field label={`时代 ${index + 1}`}><input maxLength={60} value={era.name || ''} onChange={event => updateEra(index, { name: event.target.value })} placeholder="例如：星历时代" /></Field>
                   <Field label="元年对应的故事年份" hint="跨时代计算年龄时使用"><input type="number" min="1" step="1" value={era.start_year || ''} onChange={event => updateEra(index, { start_year: event.target.value })} /></Field>
-                  <button type="button" className="remove-era-button" disabled={uses > 0 || (form.custom_eras || []).length <= 1} title={uses ? `有 ${uses} 个日期正在使用此时代` : '删除时代'} onClick={() => removeEra(era.id)}>移除</button>
+                  <div className="era-order-buttons"><button type="button" disabled={index === 0} title="移到更早的时代" aria-label={`将${era.name}移到更早的时代`} onClick={() => moveEra(index, -1)}>↑</button><button type="button" disabled={index === (form.custom_eras || []).length - 1} title="移到更晚的时代" aria-label={`将${era.name}移到更晚的时代`} onClick={() => moveEra(index, 1)}>↓</button><button type="button" className="remove-era-button" disabled={uses > 0 || (form.custom_eras || []).length <= 1} title={uses ? `有 ${uses} 个日期正在使用此时代` : '删除时代'} onClick={() => removeEra(era.id)}>移除</button></div>
                 </div>
               })}
-              <p className="field-hint">时代元年可对应故事中的连续年份。例如，新纪元元年若相当于故事第 101 年，就填 101；事件仍只需填写这个时代内的年、月、日。</p>
+              <p className="field-hint">时代按列表顺序排序（从早到晚），同一时代内再按年、月、日排序。元年对应的故事年份用于跨时代计算人物年龄；新增时代会自动建议起始年份，也可以调整。</p>
               <p className="field-hint">原有公历日期会保留；尚未补录自定义日期的资料会标注“公历”，暂不参与自定义年龄计算。</p>
             </section>}
           </>}
@@ -844,11 +916,17 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
 }
 
 function CustomDateFields({ record, prefix, label, eras, update }) {
+  const eraName = record[`${prefix}_era_name`] ?? eras.find(era => era.id === record[`${prefix}_era_id`])?.name ?? ''
   return <div className="custom-date-group">
     <strong className="custom-date-group-label">{label}</strong>
     <div className="form-grid custom-date-fields">
-      <Field label="时代"><select value={record[`${prefix}_era_id`] || ''} onChange={event => update(`${prefix}_era_id`, event.target.value)}><option value="">未填写</option>{eras.map(era => <option key={era.id} value={era.id}>{era.name}</option>)}</select></Field>
-      <Field label="年"><input type="number" min="1" step="1" value={record[`${prefix}_year`] ?? ''} onChange={event => update(`${prefix}_year`, event.target.value)} placeholder="例如：12" /></Field>
+      <Field label="时代" hint="可直接输入；新名称会自动加入时代列表"><input maxLength={60} value={eraName} onChange={event => {
+        const value = event.target.value
+        const match = eras.find(era => era.name.trim().toLocaleLowerCase() === value.trim().toLocaleLowerCase())
+        update(`${prefix}_era_name`, value)
+        update(`${prefix}_era_id`, match?.id || '')
+      }} placeholder="例如：王历" /></Field>
+      <Field label="年" hint="可留空"><input type="number" min="1" step="1" value={record[`${prefix}_year`] ?? ''} onChange={event => update(`${prefix}_year`, event.target.value)} placeholder="例如：12" /></Field>
       <Field label="月" hint="可留空"><input type="number" min="1" max="12" step="1" value={record[`${prefix}_month`] ?? ''} onChange={event => update(`${prefix}_month`, event.target.value)} placeholder="1–12" /></Field>
       <Field label="日" hint="可留空"><input type="number" min="1" max="31" step="1" value={record[`${prefix}_day`] ?? ''} onChange={event => update(`${prefix}_day`, event.target.value)} placeholder="1–31" /></Field>
     </div>
