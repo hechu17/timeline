@@ -221,6 +221,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .insert-between-event:hover { color: #344b41; }
 .insert-between-event:focus-visible, .sort-toggle:focus-visible { outline: 2px solid #779083; outline-offset: 2px; }
 .participant-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.add-participant-button { flex: none; padding: 5px 3px; border: 0; background: transparent; color: #71877a; cursor: pointer; font-size: 9px; }
+.add-participant-button:hover { color: #315e49; text-decoration: underline; }
+.add-participant-button:focus-visible { outline: 2px solid #779083; outline-offset: 2px; border-radius: 3px; }
 .person-tag { display: inline-flex; align-items: center; gap: 5px; color: #72817a; font-size: 9px; }
 .person-tag { min-height: 27px; padding: 3px 8px 3px 4px; border: 1px solid color-mix(in srgb, var(--person-color, #648073) 36%, white); border-radius: 15px; background: color-mix(in srgb, var(--person-color, #648073) 19%, white); color: #35423c; }
 .person-tag > i, .relationship-person > i { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--person-color, #648073); border-radius: 50%; background: var(--person-color, #648073); color: white; font-family: var(--serif); font-size: 9px; font-style: normal; }
@@ -304,6 +307,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dialog-close { width: 28px; height: 28px; border: 1px solid #e7e5dd; background: #f7f6f0; font-size: 19px; }
 .editor-dialog form { display: grid; gap: 14px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.calendar-mode-switch { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid #dfe4d9; border-radius: 7px; background: #f1f3ec; }
+.calendar-mode-switch button { padding: 7px 11px; border: 0; border-radius: 5px; background: transparent; color: #63736a; cursor: pointer; font-size: 10px; transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
+.calendar-mode-switch button.active { background: #fffefa; color: #285d49; box-shadow: 0 1px 3px #213e2d20; font-weight: 650; }
+.calendar-mode-switch button:disabled { cursor: wait; opacity: .65; }
 .custom-date-group { display: grid; gap: 8px; }
 .custom-date-group-label { color: #465c52; font-size: 10px; font-weight: 600; }
 .era-settings { display: grid; gap: 11px; padding: 12px; border: 1px solid #e4e5dc; border-radius: 7px; background: #f8f8f1; }
@@ -329,14 +336,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .color-field code { min-width: 62px; color: #65756d; font-family: var(--mono); font-size: 9px; }
 .color-field span { color: #a1aaa3; font-size: 9px; }
 .people-picker { min-width: 0; margin: 0; padding: 0; border: 0; }
-.people-picker legend { margin-bottom: 8px; color: #56645f; font-size: 10px; font-weight: 600; }
-.people-picker legend small { margin-left: 5px; color: #a2aaa3; font-size: 8px; font-weight: 400; }
+.people-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.people-picker-title { color: #56645f; font-size: 10px; font-weight: 600; }
+.people-picker-title small { margin-left: 5px; color: #a2aaa3; font-size: 8px; font-weight: 400; }
 .people-options { display: flex; flex-wrap: wrap; gap: 7px; }
 .people-options label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #e4e5dc; border-radius: 20px; background: #fffefa; color: #748078; cursor: pointer; font-size: 9px; }
 .people-options label.selected { border-color: #b6c8bb; background: #edf3ec; color: #48665a; }
 .people-options input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .checkbox-mark { width: 13px; height: 13px; display: grid; place-items: center; border: 1px solid #d4ddd4; border-radius: 50%; color: transparent; font-size: 8px; }
 .people-options label.selected .checkbox-mark { border-color: #6d9381; background: #6d9381; color: white; }
+.quick-character-form { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid #e2e6dc; border-radius: 7px; background: #f8f8f2; }
+.quick-character-form .form-grid { gap: 9px; }
+.quick-character-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.quick-character-actions .button { min-height: 30px; padding: 0 11px; font-size: 10px; }
 .field-hint { margin: 0; color: #a0a8a1; font-size: 9px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 3px; padding-top: 13px; border-top: 1px solid #eceae3; }
 

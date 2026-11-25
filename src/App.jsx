@@ -355,14 +355,14 @@ function Workspace({ session }) {
     beginCreate('event', { order_index: orderIndex })
   }
 
-  function beginEdit(kind, record) {
+  function beginEdit(kind, record, options = {}) {
     const editRecord = kind === 'event'
       ? { ...record, characterIds: linksByEvent[record.id] || [] }
       : record
-    setEditor({ kind, record: editRecord })
+    setEditor({ kind, record: editRecord, openQuickAdd: Boolean(options.openQuickAdd) })
   }
 
-  async function saveRecord(kind, values) {
+  async function saveRecord(kind, values, options = {}) {
     if (kind === 'story') {
       const eras = Array.isArray(values.custom_eras) && values.custom_eras.length
         ? values.custom_eras.map((era, index) => ({ id: era.id || `era-${index + 1}`, name: era.name.trim(), start_year: Number(era.start_year) || 1 }))
@@ -415,6 +415,17 @@ function Workspace({ session }) {
       }
     }
 
+    const customDatePrefixes = kind === 'character' ? ['birth', 'death'] : kind === 'event' ? ['event'] : []
+    for (const prefix of customDatePrefixes) {
+      const eraKey = `${prefix}_era_id`
+      if (values[eraKey] === '') values[eraKey] = null
+      for (const part of ['year', 'month', 'day']) {
+        const key = `${prefix}_${part}`
+        if (values[key] === '') values[key] = null
+        else if (values[key] !== undefined && values[key] !== null) values[key] = Number(values[key])
+      }
+    }
+
     const table = kind === 'character' ? 'characters' : kind === 'event' ? 'timeline_events' : 'relationships'
     const { id, characterIds, updated_at: version, ...fields } = values
     delete fields.created_at
@@ -445,7 +456,8 @@ function Workspace({ session }) {
       }
     }
     setReloadKey(value => value + 1)
-    setNotice({ type: 'success', text: kind === 'character' ? '人物资料已保存。' : kind === 'event' ? '时间线事件已保存。' : '人物关系已保存。' })
+    if (!options.quiet) setNotice({ type: 'success', text: kind === 'character' ? '人物资料已保存。' : kind === 'event' ? '时间线事件已保存。' : '人物关系已保存。' })
+    return result.data
   }
 
   async function deleteRecord(kind, record) {
@@ -464,6 +476,15 @@ function Workspace({ session }) {
       setReloadKey(value => value + 1)
       setNotice({ type: 'success', text: `${labels[kind]}已删除。` })
     }
+  }
+
+  async function updateStoryCalendarMode(nextMode) {
+    if (!selectedStory || selectedStory.calendar_mode === nextMode) return
+    const { data, error } = await supabase.from('stories').update({ calendar_mode: nextMode })
+      .eq('id', selectedStory.id).eq('updated_at', selectedStory.updated_at).select().maybeSingle()
+    if (error) throw error
+    if (!data) throw new Error('故事信息已在另一台设备上更新，请重新打开后再切换时间方式。')
+    setStories(current => current.map(story => story.id === data.id ? data : story))
   }
 
   async function signOut() {
@@ -540,7 +561,7 @@ function Workspace({ session }) {
             {notice && <div className={`notice ${notice.type}`} role="status"><span>{notice.type === 'error' ? '!' : '✓'}</span>{notice.text}<button aria-label="关闭提示" onClick={() => setNotice(null)}>×</button></div>}
             {dataLoading || storyLoading ? <div className="loading-line"><span className="spinner" />正在整理故事资料…</div> : (
               <>
-                {tab === 'timeline' && <TimelineView events={visibleEvents} allEvents={events} characters={characters} characterById={characterById} linksByEvent={linksByEvent} search={search} setSearch={setSearch} characterFilter={characterFilter} setCharacterFilter={setCharacterFilter} calendarMode={calendarMode} eras={customEras} onEdit={record => beginEdit('event', record)} onDelete={record => deleteRecord('event', record)} onAdd={addEventAtEnd} onInsert={preset => beginCreate('event', preset)} />}
+                {tab === 'timeline' && <TimelineView events={visibleEvents} allEvents={events} characters={characters} characterById={characterById} linksByEvent={linksByEvent} search={search} setSearch={setSearch} characterFilter={characterFilter} setCharacterFilter={setCharacterFilter} calendarMode={calendarMode} eras={customEras} onEdit={(record, options) => beginEdit('event', record, options)} onDelete={record => deleteRecord('event', record)} onAdd={addEventAtEnd} onInsert={preset => beginCreate('event', preset)} />}
                 {tab === 'characters' && <CharactersView characters={characters} events={events} linksByEvent={linksByEvent} calendarMode={calendarMode} eras={customEras} onEdit={record => beginEdit('character', record)} onDelete={record => deleteRecord('character', record)} onAdd={() => beginCreate('character')} />}
                 {tab === 'relationships' && <RelationshipsView relationships={relationships} characterById={characterById} characters={characters} onEdit={record => beginEdit('relationship', record)} onDelete={record => deleteRecord('relationship', record)} onAdd={() => beginCreate('relationship')} onAddCharacter={() => beginCreate('character')} />}
               </>
@@ -550,7 +571,7 @@ function Workspace({ session }) {
         )}
       </main>
 
-      {editor && <EditorDialog key={`${editor.kind}-${editor.record?.id || 'new'}`} kind={editor.kind} record={editor.record} characters={characters} events={events} calendarMode={calendarMode} eras={customEras} onClose={() => setEditor(null)} onSave={async values => { await saveRecord(editor.kind, values); setEditor(null) }} />}
+      {editor && <EditorDialog key={`${editor.kind}-${editor.record?.id || 'new'}`} kind={editor.kind} record={editor.record} characters={characters} events={events} calendarMode={calendarMode} eras={customEras} openQuickAdd={editor.openQuickAdd} onChangeCalendarMode={updateStoryCalendarMode} onAddCharacter={values => saveRecord('character', values, { quiet: true })} onClose={() => setEditor(null)} onSave={async values => { await saveRecord(editor.kind, values); setEditor(null) }} />}
       {!notice && <div className="sr-only" aria-live="polite">{dataLoading ? '正在同步' : '已同步'}</div>}
     </div>
   )
@@ -637,6 +658,7 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
                         return <span className={`person-tag ${afterDeath || age === '出生前' ? 'muted' : ''}`} key={id} style={{ '--person-color': color }}><i>{character.name.slice(0, 1)}</i>{character.name}{age && <small>{age}</small>}{afterDeath && <small>逝世后</small>}</span>
                       }) : <span className="no-participants">尚未关联人物</span>}
                     </div>
+                  <button type="button" className="add-participant-button" onClick={() => onEdit(event, { openQuickAdd: true })}>＋ 添加人物</button>
                   {participantIds.some(id => hasStoryDate(characterById[id], 'birth', calendarMode, eras) && !hasEventDate) && <span className="age-hint">补充事件日期后可核对年龄</span>}
                   </div>
                   {nextEvent && <button className="insert-between-event" title={`在「${event.title}」和「${nextEvent.title}」之间插入事件`} aria-label={`在「${event.title}」和「${nextEvent.title}」之间插入事件`} onClick={() => onInsert({ order_index: orderIndexBetween(event, nextEvent) })}>＋ 在两件事之间插入事件</button>}
@@ -755,7 +777,7 @@ function EmptyState({ title, copy, action, onAction }) {
   return <div className="empty-state"><span className="empty-state-orbit">✳</span><p className="eyebrow">留白也是开始</p><h2>{title}</h2><p>{copy}</p><button className="button button-secondary" onClick={onAction}>＋　{action}</button></div>
 }
 
-function EditorDialog({ kind, record, characters, events, calendarMode = 'gregorian', eras = DEFAULT_CUSTOM_ERAS, onClose, onSave }) {
+function EditorDialog({ kind, record, characters, events, calendarMode = 'gregorian', eras = DEFAULT_CUSTOM_ERAS, openQuickAdd = false, onChangeCalendarMode, onAddCharacter, onClose, onSave }) {
   const isEditing = Boolean(record?.id)
   const defaults = {
     story: { title: '', summary: '', calendar_mode: 'gregorian', custom_eras: DEFAULT_CUSTOM_ERAS },
@@ -765,7 +787,17 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
   }
   const [form, setForm] = useState({ ...defaults[kind], ...(record || {}) })
   const [busy, setBusy] = useState(false)
+  const [modeBusy, setModeBusy] = useState(false)
+  const [quickAddOpen, setQuickAddOpen] = useState(openQuickAdd)
+  const [quickCharacterBusy, setQuickCharacterBusy] = useState(false)
+  const [inlineCharacters, setInlineCharacters] = useState([])
   const [error, setError] = useState('')
+  const [quickCharacter, setQuickCharacter] = useState({
+    name: '', role: '', color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length],
+    birth_date: '', death_date: '', birth_era_id: '', birth_year: '', birth_month: '', birth_day: '',
+    death_era_id: '', death_year: '', death_month: '', death_day: '', description: '',
+  })
+  const availableCharacters = [...characters, ...inlineCharacters.filter(person => !characters.some(item => item.id === person.id))]
   const config = {
     story: { title: isEditing ? '编辑故事信息' : '新建故事项目', button: isEditing ? '保存故事' : '创建故事' },
     character: { title: isEditing ? '编辑人物档案' : '添加人物', button: '保存人物' },
@@ -777,9 +809,44 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
     setForm(current => ({ ...current, [field]: value }))
   }
 
+  async function changeCalendarMode(nextMode) {
+    if (nextMode === calendarMode || modeBusy) return
+    setModeBusy(true)
+    setError('')
+    try {
+      await onChangeCalendarMode(nextMode)
+    } catch (modeError) {
+      setError(modeError.message || '切换时间方式失败，请重试。')
+    } finally {
+      setModeBusy(false)
+    }
+  }
+
   function toggleCharacter(characterId) {
     const current = form.characterIds || []
     update('characterIds', current.includes(characterId) ? current.filter(id => id !== characterId) : [...current, characterId])
+  }
+
+  async function addCharacterToEvent() {
+    if (!quickCharacter.name.trim() || quickCharacterBusy) return
+    setQuickCharacterBusy(true)
+    setError('')
+    try {
+      const person = await onAddCharacter({ ...quickCharacter, name: quickCharacter.name.trim() })
+      if (!person?.id) throw new Error('人物没有成功保存，请重试。')
+      setInlineCharacters(current => [...current, person])
+      update('characterIds', [...new Set([...(form.characterIds || []), person.id])])
+      setQuickCharacter({
+        name: '', role: '', color: CHARACTER_COLORS[(characters.length + inlineCharacters.length + 1) % CHARACTER_COLORS.length],
+        birth_date: '', death_date: '', birth_era_id: '', birth_year: '', birth_month: '', birth_day: '',
+        death_era_id: '', death_year: '', death_month: '', death_day: '', description: '',
+      })
+      setQuickAddOpen(false)
+    } catch (addError) {
+      setError(addError.message || '添加人物失败，请重试。')
+    } finally {
+      setQuickCharacterBusy(false)
+    }
   }
 
   function updateEra(index, changes) {
@@ -895,11 +962,12 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
             <Field label="人物档案" hint="性格、目标、背景或其他创作备注"><textarea rows="4" maxLength={3000} value={form.description} onChange={event => update('description', event.target.value)} placeholder="写下你希望在创作中记住的事…" /></Field>
           </>}
           {kind === 'event' && <>
+            <Field label="时间方式（整个故事）" hint="会立即影响全故事的事件排序和人物年龄轴，并自动保存。两种日期分别保留；切换后需补录对应日期，才能按新历法排序和计算年龄。"><div className="calendar-mode-switch" role="group" aria-label="切换本故事的时间方式"><button type="button" className={calendarMode === 'gregorian' ? 'active' : ''} disabled={modeBusy || busy} onClick={() => changeCalendarMode('gregorian')}>现实公历</button><button type="button" className={calendarMode === 'custom' ? 'active' : ''} disabled={modeBusy || busy} onClick={() => changeCalendarMode('custom')}>{modeBusy ? '切换中…' : '自定义纪年'}</button></div></Field>
             <Field label="事件名称"><input autoFocus maxLength={160} value={form.title} onChange={event => update('title', event.target.value)} placeholder="例如：两人在旧车站重逢" required /></Field>
             {calendarMode === 'custom' ? <><CustomDateFields record={form} prefix="event" label="事件时间" eras={eras} update={update} /><Field label="补充时间" hint="可写季节、节气或模糊时间"><input maxLength={100} value={form.date_label || ''} onChange={event => update('date_label', event.target.value)} placeholder="例如：初秋、庆典后数日" /></Field></> : <div className="form-grid"><Field label="精确日期" hint="已知具体日期时填写，可计算人物年龄"><input type="date" value={form.event_date || ''} onChange={event => update('event_date', event.target.value)} /></Field><Field label="故事内日期" hint="可填写纪年、季节或模糊时间"><input maxLength={100} value={form.date_label || ''} onChange={event => update('date_label', event.target.value)} placeholder="例如：王历十二年·初秋" /></Field></div>}
             <Field label="时间文字颜色" hint="只改变这条事件的日期标签颜色"><div className="color-field"><input type="color" value={form.date_color || DEFAULT_DATE_COLOR} onChange={event => update('date_color', event.target.value)} /><code>{form.date_color || DEFAULT_DATE_COLOR}</code><span>用于时间线左侧的日期</span></div></Field>
             <Field label="事件内容"><textarea rows="3" maxLength={3000} value={form.description || ''} onChange={event => update('description', event.target.value)} placeholder="补充事件经过、转折或前因后果…" /></Field>
-            <fieldset className="people-picker"><legend>关联人物 <small>可多选</small></legend>{characters.length ? <div className="people-options">{characters.map(character => <label key={character.id} className={(form.characterIds || []).includes(character.id) ? 'selected' : ''}><input type="checkbox" checked={(form.characterIds || []).includes(character.id)} onChange={() => toggleCharacter(character.id)} /><span className="checkbox-mark">✓</span>{character.name}</label>)}</div> : <p className="field-hint">还没有人物档案，可以先保存事件再添加人物。</p>}</fieldset>
+            <fieldset className="people-picker"><legend className="sr-only">关联人物</legend><div className="people-picker-heading"><span className="people-picker-title">关联人物 <small>可多选</small></span><button type="button" className="text-button" onClick={() => setQuickAddOpen(open => !open)}>＋ 添加人物</button></div>{availableCharacters.length ? <div className="people-options">{availableCharacters.map(character => <label key={character.id} className={(form.characterIds || []).includes(character.id) ? 'selected' : ''}><input type="checkbox" checked={(form.characterIds || []).includes(character.id)} onChange={() => toggleCharacter(character.id)} /><span className="checkbox-mark">✓</span>{character.name}</label>)}</div> : <p className="field-hint">还没有人物，可直接在这里添加。</p>}{quickAddOpen && <div className="quick-character-form"><p className="field-hint">新人物会立即保存到故事；保存事件后完成关联，其他档案可之后补充。</p><div className="form-grid"><Field label="人物姓名"><input autoFocus maxLength={100} value={quickCharacter.name} onChange={event => setQuickCharacter(current => ({ ...current, name: event.target.value }))} placeholder="输入姓名" /></Field><Field label="身份 / 角色"><input maxLength={100} value={quickCharacter.role} onChange={event => setQuickCharacter(current => ({ ...current, role: event.target.value }))} placeholder="主角、导师…（可选）" /></Field></div><Field label="人物专属颜色"><div className="color-field"><input type="color" value={quickCharacter.color} onChange={event => setQuickCharacter(current => ({ ...current, color: event.target.value }))} /><code>{quickCharacter.color}</code><span>用于人物标签和时间线</span></div></Field><div className="quick-character-actions"><button type="button" className="button button-quiet" disabled={quickCharacterBusy} onClick={() => setQuickAddOpen(false)}>取消</button><button type="button" className="button button-secondary" disabled={quickCharacterBusy || !quickCharacter.name.trim()} onClick={addCharacterToEvent}>{quickCharacterBusy ? '添加中…' : '添加并关联'}</button></div></div>}</fieldset>
           </>}
           {kind === 'relationship' && <>
             <div className="form-grid"><Field label="人物 A"><select value={form.source_character_id} onChange={event => update('source_character_id', event.target.value)} required><option value="" disabled>选择人物</option>{characters.map(character => <option key={character.id} value={character.id} disabled={character.id === form.target_character_id}>{character.name}</option>)}</select></Field><Field label="人物 B"><select value={form.target_character_id} onChange={event => update('target_character_id', event.target.value)} required><option value="" disabled>选择人物</option>{characters.map(character => <option key={character.id} value={character.id} disabled={character.id === form.source_character_id}>{character.name}</option>)}</select></Field></div>
@@ -908,7 +976,7 @@ function EditorDialog({ kind, record, characters, events, calendarMode = 'gregor
             <Field label="关系备注"><textarea rows="3" maxLength={2000} value={form.notes || ''} onChange={event => update('notes', event.target.value)} placeholder="这段关系如何开始？是否发生过变化？" /></Field>
           </>}
           {error && <p className="form-message error">{error}</p>}
-          <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={onClose}>取消</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? '保存中…' : config.button}</button></div>
+          <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={onClose}>取消</button><button type="submit" className="button button-primary" disabled={busy || modeBusy}>{busy ? '保存中…' : config.button}</button></div>
         </form>
       </section>
     </div>
