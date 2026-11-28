@@ -432,6 +432,10 @@ function Workspace({ session }) {
     delete fields.story_id
     delete fields.user_id
     if (kind === 'event') fields.event_date ||= null
+    if (kind === 'character') {
+      fields.birth_date ||= null
+      fields.death_date ||= null
+    }
     const row = { ...fields, story_id: selectedStoryId, user_id: user.id }
     let result
     if (id) result = await supabase.from(table).update(row).eq('id', id).eq('story_id', selectedStoryId).eq('updated_at', version).select().maybeSingle()
