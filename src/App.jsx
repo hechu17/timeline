@@ -588,6 +588,17 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
       || (a.created_at || '').localeCompare(b.created_at || '')
     return sortDirection === 'asc' ? order : -order
   })
+  const parallelGroups = []
+  displayedEvents.forEach((event, index) => {
+    const previousGroup = parallelGroups[parallelGroups.length - 1]
+    const reference = previousGroup?.events[0]
+    const sharesDate = reference
+      && hasStoryDate(reference, 'event', calendarMode, eras)
+      && hasStoryDate(event, 'event', calendarMode, eras)
+      && compareStoryDates(reference, 'event', event, 'event', calendarMode, eras) === 0
+    if (sharesDate) previousGroup.events.push(event)
+    else parallelGroups.push({ events: [event], startIndex: index })
+  })
   const focusedCharacter = characterById[characterFilter]
   const counts = Object.fromEntries(characters.map(character => [
     character.id,
@@ -606,7 +617,7 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
   return (
     <section className="timeline-section">
       <div className="list-toolbar">
-        <div className="timeline-intro"><span className="timeline-intro-mark">01</span><span><strong>事件编年</strong><small>按日期自动排列 · 支持人物专属视角</small></span></div>
+        <div className="timeline-intro"><span className="timeline-intro-mark">01</span><span><strong>事件编年</strong><small>按日期自动排列 · 同时事件并列显示 · 支持人物专属视角</small></span></div>
         <div className="toolbar-filters"><button className="sort-toggle" aria-pressed={sortDirection === 'asc'} onClick={() => setSortDirection(direction => direction === 'asc' ? 'desc' : 'asc')}>{sortDirection === 'asc' ? '↑ 正序' : '↓ 倒序'}</button><label className="search-field"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索事件" /></label></div>
       </div>
       <div className="perspective-bar">
@@ -623,10 +634,10 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
       {displayedEvents.length === 0 ? <EmptyState title={focusedCharacter ? `${focusedCharacter.name}还没有关联事件` : '时间线还没有事件'} copy={focusedCharacter ? '为 TA 关联已有事件，或创建一个新的故事时刻。' : '从转折、相遇或一个关键决定开始记录。'} action="添加事件" onAction={() => onAdd(sortDirection)} /> : (
         <div className="timeline-list">
           {focusedCharacter && <div className="age-axis-heading"><div><strong>人物年龄轴</strong><small>{focusedCharacter.name} · 事件发生时</small></div></div>}
-          {displayedEvents.map((event, index) => {
-            const nextEvent = displayedEvents[index + 1]
-            const participantIds = linksByEvent[event.id] || []
-            const firstParticipant = characterById[participantIds[0]]
+          {parallelGroups.map((group, groupIndex) => {
+            const event = group.events[0]
+            const nextGroup = parallelGroups[groupIndex + 1]
+            const firstParticipant = characterById[(linksByEvent[event.id] || [])[0]]
             const accentCharacter = focusedCharacter || firstParticipant
             const accent = accentCharacter?.color || CHARACTER_COLORS[Math.max(0, characters.indexOf(accentCharacter)) % CHARACTER_COLORS.length]
             const eventDate = formatStoryDate(event, 'event', calendarMode, eras)
@@ -640,28 +651,38 @@ function TimelineView({ events, allEvents, characters, characterById, linksByEve
             const ageLabel = !hasBirthDate ? '生日待填' : !hasEventDate ? '日期待定' : afterDeath ? '逝世后' : eventAge || '年龄待定'
             return (
               <article className={`timeline-row ${focusedCharacter ? 'with-age-axis' : ''}`} key={event.id} style={{ '--event-accent': accent, '--date-color': event.date_color || DEFAULT_DATE_COLOR, '--person-color': focusedCharacter?.color || accent }}>
-                <div className="timeline-marker-column"><span className="timeline-node">{String(index + 1).padStart(2, '0')}</span><span className="timeline-stem" /></div>
+                <div className="timeline-marker-column"><span className="timeline-node">{String(group.startIndex + 1).padStart(2, '0')}</span><span className="timeline-stem" /></div>
                 <div className="timeline-date-column"><span className="date-chip">{displayEventDate || '时间待定'}</span>{secondaryEventDate && <small>{secondaryEventDate}</small>}</div>
-                <div className="event-card">
-                  <div className="event-card-top"><span className="event-kicker">STORY BEAT　/　{String(index + 1).padStart(2, '0')}</span><div className="record-actions"><button onClick={() => onEdit(event)}>编辑</button><button className="danger-text" onClick={() => onDelete(event)}>删除</button></div></div>
-                  <h2>{event.title}</h2>
-                  {event.description && <p className="event-description">{event.description}</p>}
-                  <div className="event-bottom">
-                    <div className="participant-list">
-                      {participantIds.length ? participantIds.map(id => {
-                        const character = characterById[id]
-                        if (!character) return null
-                        const color = character.color || CHARACTER_COLORS[Math.max(0, characters.indexOf(character)) % CHARACTER_COLORS.length]
-                        const age = ageAtStoryDate(character, event, calendarMode, eras)
-                        const afterDeath = hasStoryDate(character, 'death', calendarMode, eras)
-                          && isAfterStoryDate(event, 'event', character, 'death', calendarMode, eras)
-                        return <span className={`person-tag ${afterDeath || age === '出生前' ? 'muted' : ''}`} key={id} style={{ '--person-color': color }}><i>{character.name.slice(0, 1)}</i>{character.name}{age && <small>{age}</small>}{afterDeath && <small>逝世后</small>}</span>
-                      }) : <span className="no-participants">尚未关联人物</span>}
+                <div className="parallel-event-grid">
+                  {group.events.map((parallelEvent, parallelIndex) => {
+                    const eventIndex = group.startIndex + parallelIndex
+                    const nextEvent = parallelIndex === group.events.length - 1 ? nextGroup?.events[0] : null
+                    const participantIds = linksByEvent[parallelEvent.id] || []
+                    const cardFirstParticipant = characterById[participantIds[0]]
+                    const cardAccentCharacter = focusedCharacter || cardFirstParticipant
+                    const cardAccent = cardAccentCharacter?.color || CHARACTER_COLORS[Math.max(0, characters.indexOf(cardAccentCharacter)) % CHARACTER_COLORS.length]
+                    return <div className="event-card" key={parallelEvent.id} style={{ '--event-accent': cardAccent, '--person-color': focusedCharacter?.color || cardAccent }}>
+                      <div className="event-card-top"><span className="event-kicker">STORY BEAT　/　{String(eventIndex + 1).padStart(2, '0')}</span><div className="record-actions"><button onClick={() => onEdit(parallelEvent)}>编辑</button><button className="danger-text" onClick={() => onDelete(parallelEvent)}>删除</button></div></div>
+                      <h2>{parallelEvent.title}</h2>
+                      {parallelEvent.description && <p className="event-description">{parallelEvent.description}</p>}
+                      <div className="event-bottom">
+                        <div className="participant-list">
+                          {participantIds.length ? participantIds.map(id => {
+                            const character = characterById[id]
+                            if (!character) return null
+                            const color = character.color || CHARACTER_COLORS[Math.max(0, characters.indexOf(character)) % CHARACTER_COLORS.length]
+                            const age = ageAtStoryDate(character, parallelEvent, calendarMode, eras)
+                            const characterAfterDeath = hasStoryDate(character, 'death', calendarMode, eras)
+                              && isAfterStoryDate(parallelEvent, 'event', character, 'death', calendarMode, eras)
+                            return <span className={`person-tag ${characterAfterDeath || age === '出生前' ? 'muted' : ''}`} key={id} style={{ '--person-color': color }}><i>{character.name.slice(0, 1)}</i>{character.name}{age && <small>{age}</small>}{characterAfterDeath && <small>逝世后</small>}</span>
+                          }) : <span className="no-participants">尚未关联人物</span>}
+                        </div>
+                        <button type="button" className="add-participant-button" onClick={() => onEdit(parallelEvent, { openQuickAdd: true })}>＋ 添加人物</button>
+                        {participantIds.some(id => hasStoryDate(characterById[id], 'birth', calendarMode, eras) && !hasEventDate) && <span className="age-hint">补充事件日期后可核对年龄</span>}
+                      </div>
+                      {nextEvent && <button className="insert-between-event" title={`在「${parallelEvent.title}」和「${nextEvent.title}」之间插入事件`} aria-label={`在「${parallelEvent.title}」和「${nextEvent.title}」之间插入事件`} onClick={() => onInsert({ order_index: orderIndexBetween(parallelEvent, nextEvent) })}>＋ 在两件事之间插入事件</button>}
                     </div>
-                  <button type="button" className="add-participant-button" onClick={() => onEdit(event, { openQuickAdd: true })}>＋ 添加人物</button>
-                  {participantIds.some(id => hasStoryDate(characterById[id], 'birth', calendarMode, eras) && !hasEventDate) && <span className="age-hint">补充事件日期后可核对年龄</span>}
-                  </div>
-                  {nextEvent && <button className="insert-between-event" title={`在「${event.title}」和「${nextEvent.title}」之间插入事件`} aria-label={`在「${event.title}」和「${nextEvent.title}」之间插入事件`} onClick={() => onInsert({ order_index: orderIndexBetween(event, nextEvent) })}>＋ 在两件事之间插入事件</button>}
+                  })}
                 </div>
                 {focusedCharacter && <div className={`age-axis-column ${ageLabel === '生日待填' || ageLabel === '日期待定' || ageLabel === '年龄待定' ? 'unknown' : ''}`} title={`${focusedCharacter.name}：${ageLabel}`}><span className="age-axis-point" /><strong>{ageLabel}</strong></div>}
               </article>
@@ -701,12 +722,13 @@ function CharactersView({ characters, events, linksByEvent, calendarMode = 'greg
 
 function RelationshipsView({ relationships, characterById, characters, onEdit, onDelete, onAdd, onAddCharacter }) {
   const [view, setView] = useState('network')
+  const [centerCharacterId, setCenterCharacterId] = useState(null)
   if (characters.length < 2) return <EmptyState title="先认识几位人物" copy="至少添加两个人物，才能记录他们之间的关系。" action="添加人物" onAction={onAddCharacter} />
   return (
     <section className="relationship-board">
-      <div className="relationship-board-heading"><span className="relationship-board-symbol">⌘</span><div className="relationship-heading-copy"><strong>人物关系</strong><small>沿着人物之间的连线，查看故事中的关系网络。</small></div><div className="relationship-view-toggle" role="group" aria-label="关系显示方式"><button className={view === 'network' ? 'active' : ''} onClick={() => setView('network')}>关系网</button><button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>明细列表</button></div></div>
+      <div className="relationship-board-heading"><span className="relationship-board-symbol">⌘</span><div className="relationship-heading-copy"><strong>人物关系</strong><small>点击关系网中的人物，查看以 TA 为中心的关系视图。</small></div><div className="relationship-view-toggle" role="group" aria-label="关系显示方式"><button className={view === 'network' && !centerCharacterId ? 'active' : ''} onClick={() => { setView('network'); setCenterCharacterId(null) }}>全量关系网</button><button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>明细列表</button></div></div>
       {view === 'network' ? (
-        <RelationshipNetwork characters={characters} relationships={relationships} />
+        <RelationshipNetwork characters={characters} relationships={relationships} centerCharacterId={centerCharacterId} onSelectCharacter={setCenterCharacterId} onBack={() => setCenterCharacterId(null)} />
       ) : relationships.length ? (
         <div className="relationship-list">
           {relationships.map((relationship, index) => {
@@ -731,28 +753,44 @@ function RelationshipsView({ relationships, characterById, characters, onEdit, o
   )
 }
 
-function RelationshipNetwork({ characters, relationships }) {
+function RelationshipNetwork({ characters, relationships, centerCharacterId, onSelectCharacter, onBack }) {
   const width = 860
   const height = 480
   const centerX = width / 2
   const centerY = 220
-  const radiusX = characters.length === 2 ? 205 : 300
-  const radiusY = characters.length === 2 ? 0 : 155
-  const positions = Object.fromEntries(characters.map((character, index) => {
-    const angle = characters.length === 2 ? Math.PI * index : -Math.PI / 2 + (2 * Math.PI * index) / characters.length
+  const centerCharacter = characters.find(character => character.id === centerCharacterId)
+  const visibleRelationships = centerCharacter
+    ? relationships.filter(relationship => relationship.source_character_id === centerCharacter.id || relationship.target_character_id === centerCharacter.id)
+    : relationships
+  const visibleCharacterIds = centerCharacter
+    ? new Set([centerCharacter.id, ...visibleRelationships.flatMap(relationship => [relationship.source_character_id, relationship.target_character_id])])
+    : null
+  const visibleCharacters = visibleCharacterIds ? characters.filter(character => visibleCharacterIds.has(character.id)) : characters
+  const otherCharacters = centerCharacter ? visibleCharacters.filter(character => character.id !== centerCharacter.id) : []
+  const radiusX = visibleCharacters.length === 2 ? 205 : 300
+  const radiusY = visibleCharacters.length === 2 ? 0 : 155
+  const positions = Object.fromEntries(visibleCharacters.map((character, index) => {
+    if (centerCharacter && character.id === centerCharacter.id) return [character.id, { x: centerX, y: centerY }]
+    if (centerCharacter) {
+      if (otherCharacters.length === 1) return [character.id, { x: centerX + 220, y: centerY }]
+      const angle = -Math.PI / 2 + (2 * Math.PI * otherCharacters.indexOf(character)) / Math.max(1, otherCharacters.length)
+      return [character.id, { x: centerX + 280 * Math.cos(angle), y: centerY + 145 * Math.sin(angle) }]
+    }
+    const angle = visibleCharacters.length === 2 ? Math.PI * index : -Math.PI / 2 + (2 * Math.PI * index) / visibleCharacters.length
     return [character.id, { x: centerX + radiusX * Math.cos(angle), y: centerY + radiusY * Math.sin(angle) }]
   }))
 
   return (
     <div className="network-wrap">
+      {centerCharacter && <div className="network-focus-bar"><span>以 <strong>{centerCharacter.name}</strong> 为中心 · 显示 {visibleRelationships.length} 条直接关系</span><button type="button" onClick={onBack}>← 返回全量关系网</button></div>}
       <div className="network-canvas">
-        {!relationships.length && <p className="network-empty-note">添加关系后，人物之间会出现连线</p>}
+        {!visibleRelationships.length && <p className="network-empty-note">{centerCharacter ? `${centerCharacter.name}还没有登记关系` : '添加关系后，人物之间会出现连线'}</p>}
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="人物关系网络图">
           <g className="network-edges">
-            {relationships.map(relationship => {
+            {visibleRelationships.map(relationship => {
               const source = positions[relationship.source_character_id]
               const target = positions[relationship.target_character_id]
-              const sourceCharacter = characters.find(character => character.id === relationship.source_character_id)
+              const sourceCharacter = visibleCharacters.find(character => character.id === relationship.source_character_id)
               if (!source || !target) return null
               const middleX = (source.x + target.x) / 2
               const middleY = (source.y + target.y) / 2
@@ -760,15 +798,17 @@ function RelationshipNetwork({ characters, relationships }) {
             })}
           </g>
           <g className="network-nodes">
-            {characters.map((character, index) => {
+            {visibleCharacters.map((character, index) => {
               const position = positions[character.id]
-              const color = character.color || CHARACTER_COLORS[index % CHARACTER_COLORS.length]
-              return <g key={character.id} transform={`translate(${position.x} ${position.y})`} style={{ '--person-color': color }}><circle className="network-node-halo" r="38" /><circle className="network-node-core" r="20" /><text className="network-node-initial" y="5" textAnchor="middle">{character.name.slice(0, 1)}</text><text className="network-node-name" y="58" textAnchor="middle">{character.name}</text></g>
+              const color = character.color || CHARACTER_COLORS[characters.indexOf(character) % CHARACTER_COLORS.length]
+              const isCenter = character.id === centerCharacter?.id
+              const selectCharacter = () => onSelectCharacter(isCenter ? null : character.id)
+              return <g key={character.id} className={`network-node ${isCenter ? 'is-center' : ''}`} transform={`translate(${position.x} ${position.y})`} style={{ '--person-color': color }} role="button" tabIndex="0" aria-label={`以${character.name}为中心查看关系`} onClick={selectCharacter} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectCharacter() } }}><title>点击查看以{character.name}为中心的关系</title><circle className="network-node-halo" r={isCenter ? 44 : 38} /><circle className="network-node-core" r={isCenter ? 24 : 20} /><text className="network-node-initial" y="5" textAnchor="middle">{character.name.slice(0, 1)}</text><text className="network-node-name" y="58" textAnchor="middle">{character.name}</text></g>
             })}
           </g>
         </svg>
       </div>
-      <div className="network-legend">{characters.map((character, index) => <span key={character.id}><i style={{ background: character.color || CHARACTER_COLORS[index % CHARACTER_COLORS.length] }} />{character.name}</span>)}<small>{relationships.length} 条关系</small></div>
+      <div className="network-legend">{visibleCharacters.map((character, index) => <span key={character.id}><i style={{ background: character.color || CHARACTER_COLORS[characters.indexOf(character) % CHARACTER_COLORS.length] }} />{character.name}</span>)}<small>{visibleRelationships.length} 条关系</small></div>
     </div>
   )
 }

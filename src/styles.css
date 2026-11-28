@@ -207,6 +207,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .age-axis-column.unknown strong { border-color: #e4e3dc; background: #f1f0ea; color: #969e98; }
 .timeline-row:last-of-type .age-axis-column::before { bottom: calc(100% - 27px); }
 .event-card { min-width: 0; align-self: start; margin: 10px 0 13px; padding: 15px 17px 13px; border: 1px solid #e6e4dc; border-left: 2px solid var(--event-accent, #82958b); border-radius: 7px; background: rgba(251,250,246,.8); transition: border-color .15s, box-shadow .15s; }
+.parallel-event-grid { grid-column: 3; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); align-items: start; gap: 0 10px; }
 .event-card:hover { border-color: #d8ddd3; box-shadow: 0 4px 17px rgba(48,65,59,.045); }
 .event-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .event-kicker { color: #a4aaa3; font-family: var(--mono); font-size: 8px; letter-spacing: .06em; }
@@ -265,6 +266,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .relationship-view-toggle button { min-height: 27px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #8b9790; cursor: pointer; font-size: 9px; }
 .relationship-view-toggle button.active { background: #fffefa; color: #49675c; box-shadow: 0 1px 3px rgba(39,58,48,.1); font-weight: 600; }
 .network-wrap { padding: 15px 16px 13px; }
+.network-focus-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding: 9px 11px; border: 1px solid #e1e7df; border-radius: 6px; background: #f3f6f0; color: #708077; font-size: 9px; }
+.network-focus-bar strong { color: #446b59; font-weight: 650; }
+.network-focus-bar button { padding: 3px 0; border: 0; background: transparent; color: #57806b; cursor: pointer; font-size: 9px; white-space: nowrap; }
+.network-focus-bar button:hover { color: #315e49; text-decoration: underline; }
 .network-canvas { position: relative; overflow: hidden; border: 1px solid #e4e6dd; border-radius: 7px; background: radial-gradient(ellipse at center, #fbfaf6 0%, #f5f5ef 100%); }
 .network-canvas svg { width: 100%; height: auto; display: block; }
 .network-edges line { stroke-width: 2.5; opacity: .55; }
@@ -272,6 +277,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .network-edges text { fill: #596860; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 10px; }
 .network-node-halo { fill: var(--person-color); fill-opacity: .18; stroke: var(--person-color); stroke-width: 2; }
 .network-node-core { fill: var(--person-color); }
+.network-node { cursor: pointer; outline: none; }
+.network-node:hover .network-node-halo, .network-node:focus-visible .network-node-halo { fill-opacity: .3; stroke-width: 3; }
+.network-node.is-center .network-node-core { stroke: #fffefa; stroke-width: 3; }
 .network-node-initial { fill: white; font-family: var(--serif); font-size: 15px; font-weight: 600; }
 .network-node-name { fill: #354640; font-family: var(--serif); font-size: 12px; font-weight: 600; }
 .network-empty-note { position: absolute; right: 12px; top: 10px; z-index: 1; margin: 0; color: #9aa59d; font-size: 9px; }
@@ -419,7 +427,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .timeline-stem { top: 39px; }
   .timeline-date-column { grid-column: 2; padding-top: 12px; text-align: left; }
   .timeline-date-column small { display: inline; margin-left: 6px; }
-  .event-card { grid-column: 2; margin: 6px 0 15px; padding: 13px; }
+  .parallel-event-grid { grid-column: 2; grid-template-columns: 1fr; }
+  .event-card { margin: 6px 0 15px; padding: 13px; }
   .event-card h2 { font-size: 15px; }
   .event-bottom { align-items: flex-start; flex-direction: column; }
   .age-hint { align-self: flex-end; }
